@@ -246,3 +246,6 @@ Do you prefer Azure OpenAI or Content Safety for your moderation?
 If you’ve got your blog storage (SQL, Cosmos, Supabase, etc.), I can wire the “save to DB” part too.
 
 If you paste your current form HTML skeleton (or the repo layout for dcsswebdev.com), I’ll slot this in exactly where you need it.
+
+**** Database code ****
+
