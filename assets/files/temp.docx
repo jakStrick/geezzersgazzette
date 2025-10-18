@@ -1,0 +1,251 @@
+***** Version I ********
+
+<!-- Example HTML structure -->
+<form class="comment-form" data-post-id="POST_ID_123">
+  <input type="text" class="comment-name" placeholder="Your name" />
+  <textarea class="comment-text" placeholder="Your comment"></textarea>
+  <button type="button" class="comment-submit">Post Comment</button>
+</form>
+
+<ul class="comment-list"></ul>
+
+// Comment form handling with server-side AI moderation
+document.querySelectorAll(".comment-submit").forEach((button) => {
+  button.addEventListener("click", async function (e) {
+    e.preventDefault();
+
+    const form = e.target.closest(".comment-form");
+    const nameEl = form.querySelector(".comment-name");
+    const textEl = form.querySelector(".comment-text");
+    const name = (nameEl?.value || "").trim();
+    const text = (textEl?.value || "").trim();
+    const postId = form.dataset.postId || "default";
+
+    if (!name || !text) {
+      alert("Please fill in both your name and comment.");
+      return;
+    }
+
+    // UX state
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = "Submitting…";
+
+    try {
+      const res = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, text, postId })
+      });
+
+      if (!res.ok) {
+        let msg = "There was a problem submitting your comment. Please try again.";
+        try {
+          const data = await res.json();
+          if (data?.message) msg = data.message;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const data = await res.json(); // { status: 'accepted'|'rejected', moderated, comment? }
+
+      if (data.status === "rejected") {
+        // You can show the categories or leave it generic
+        alert("Your comment was flagged by our AI moderation and wasn’t posted.");
+      } else if (data.status === "accepted" && data.comment) {
+        // Append to the comment list
+        appendCommentToList(form, data.comment);
+        nameEl.value = "";
+        textEl.value = "";
+      } else {
+        alert("Unexpected response from server.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Unexpected error. Please try again.");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  });
+});
+
+function appendCommentToList(form, comment) {
+  const list = form.closest(".post")?.querySelector(".comment-list") ||
+               document.querySelector(".comment-list");
+
+  if (!list) return;
+
+  const li = document.createElement("li");
+  li.className = "comment";
+  li.innerHTML = `
+    <div class="comment-header">
+      <strong>${escapeHtml(comment.name)}</strong>
+      <span class="timestamp">${new Date(comment.createdAt).toLocaleString()}</span>
+    </div>
+    <p>${escapeHtml(comment.text)}</p>
+  `;
+  list.prepend(li);
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+# .env
+AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com
+AZURE_OPENAI_API_KEY=YOUR_KEY
+AZURE_OPENAI_MODERATION_DEPLOYMENT=omni-moderation-latest
+# Optional: moderation threshold tuning
+MOD_REJECT_ON_FLAG=true
+
+// server.js (Express example; Node 18+ has global fetch)
+import express from "express";
+import crypto from "node:crypto";
+
+const app = express();
+app.use(express.json());
+
+app.post("/api/comments", async (req, res) => {
+  const { name, text, postId } = req.body || {};
+  if (!name || !text) return res.status(400).json({ message: "Missing name or text." });
+
+  try {
+    const mod = await moderateWithAzureOpenAI({ name, text });
+    if (mod.rejected) {
+      return res.status(200).json({ status: "rejected", moderated: mod });
+    }
+
+    // Persist in your DB; demo payload below:
+    const comment = {
+      id: crypto.randomUUID(),
+      postId: postId || "default",
+      name: name.trim(),
+      text: text.trim(),
+      createdAt: Date.now()
+    };
+
+    // TODO: save to DB here
+
+    return res.status(200).json({ status: "accepted", moderated: mod, comment });
+  } catch (err) {
+    console.error("Moderation error:", err);
+    return res.status(500).json({ message: "Moderation service unavailable." });
+  }
+});
+
+async function moderateWithAzureOpenAI({ name, text }) {
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+  const key = process.env.AZURE_OPENAI_API_KEY;
+  const deployment = process.env.AZURE_OPENAI_MODERATION_DEPLOYMENT;
+  const rejectOnFlag = String(process.env.MOD_REJECT_ON_FLAG || "true") === "true";
+
+  const input = `${name} says: ${text}`;
+
+  const url = `${endpoint}/openai/deployments/${deployment}/moderations?api-version=2024-06-01`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "api-key": key,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ input })
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`Azure OpenAI moderation failed: ${resp.status} ${body}`);
+  }
+
+  const data = await resp.json();
+  const result = data?.results?.[0] || {};
+  // If `flagged` is true or any category is true, reject:
+  const flagged = result.flagged === true ||
+                  (result.categories && Object.values(result.categories).some(Boolean));
+
+  return {
+    provider: "azure-openai",
+    flagged,
+    rejected: rejectOnFlag ? flagged : false,
+    raw: result
+  };
+}
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`API listening on :${port}`));
+
+
+****** Version II ************
+
+# .env
+AZURE_CONTENT_SAFETY_ENDPOINT=https://YOUR-RESOURCE.cognitiveservices.azure.com
+AZURE_CONTENT_SAFETY_KEY=YOUR_KEY
+SEVERITY_THRESHOLD=2 # 0..6; reject if any category >= threshold
+
+async function moderateWithAzureContentSafety({ name, text }) {
+  const endpoint = process.env.AZURE_CONTENT_SAFETY_ENDPOINT;
+  const key = process.env.AZURE_CONTENT_SAFETY_KEY;
+  const threshold = Number(process.env.SEVERITY_THRESHOLD || 2);
+  const input = `${name} says: ${text}`;
+
+  // API version may change; check your resource’s latest stable version in Azure Portal
+  const url = `${endpoint}/contentsafety/text:analyze?api-version=2023-10-01-preview`;
+  const body = {
+    text: input,
+    categories: ["Hate", "SelfHarm", "Sexual", "Violence"]
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Ocp-Apim-Subscription-Key": key,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => "");
+    throw new Error(`Content Safety failed: ${resp.status} ${detail}`);
+  }
+
+  const data = await resp.json();
+  // Example shape: data.categoriesAnalysis = [{ category:"Hate", severity:0..6 }, ...]
+  const categories = data.categoriesAnalysis || [];
+  const maxSeverity = categories.reduce((m, c) => Math.max(m, c.severity || 0), 0);
+  const rejected = maxSeverity >= threshold;
+
+  return {
+    provider: "azure-content-safety",
+    maxSeverity,
+    categories,
+    rejected,
+    raw: data
+  };
+}
+
+
+Suggested UX & Policy Tips
+
+Queue vs. auto-post: You can easily switch the logic to “store but don’t render yet,” then show “Thanks! Your comment will appear after moderation.”
+Threshold tuning: Start strict (reject on flagged or severity >= 2), then adjust based on false positives.
+Abuse controls: Add CAPTCHA/hCaptcha + IP rate limiting to cut spam.
+XSS safety: Always escape untrusted values when injecting into the DOM (see escapeHtml).
+Resilience: If moderation API fails, either block with a nice message, or fallback to manual review only.
+
+
+Want me to tailor it to your stack?
+
+Are you hosting on Vercel/Netlify/Azure App Service? I can give you a serverless function version for /api/comments.
+Do you prefer Azure OpenAI or Content Safety for your moderation?
+If you’ve got your blog storage (SQL, Cosmos, Supabase, etc.), I can wire the “save to DB” part too.
+
+If you paste your current form HTML skeleton (or the repo layout for dcsswebdev.com), I’ll slot this in exactly where you need it.
+
+**** Database code ****
+
