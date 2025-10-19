@@ -77,7 +77,6 @@ class TemplateLoader {
 			await Promise.all([
 				await this.loadNavbar(),
 				await this.loadHero(),
-
 				await this.loadBlog(),
 				await this.updateDate(),
 
