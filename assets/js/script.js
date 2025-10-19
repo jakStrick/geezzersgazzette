@@ -1,19 +1,3 @@
-// Update current date
-const updateDate = () => {
-	const now = new Date();
-	const options = {
-		weekday: "long",
-		year: "numeric",
-		month: "long",
-		day: "numeric",
-	};
-	document.getElementById("currentDate").textContent = now.toLocaleDateString(
-		"en-US",
-		options
-	);
-};
-updateDate();
-
 // Smooth scroll
 document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
 	anchor.addEventListener("click", function (e) {
@@ -27,6 +11,7 @@ document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
 
 // Dynamic content loading simulation
 const loadMoreContent = () => {
+	alert("Loading more articles...");
 	console.log("Loading more articles...");
 	// This would connect to your backend/CMS
 };
@@ -91,6 +76,11 @@ class TemplateLoader {
 		try {
 			await Promise.all([
 				await this.loadNavbar(),
+				await this.loadHero(),
+
+				await this.loadBlog(),
+				await this.updateDate(),
+
 				//await this.loadBanner(pageName),
 			]);
 		} catch (error) {
@@ -112,6 +102,34 @@ class TemplateLoader {
 		}
 	}
 
+	async loadBlog() {
+		try {
+			const response = await fetch("./assets/blogs/blog2.html");
+			const html = await response.text();
+
+			const placeholder = document.getElementById("blog-placeholder");
+			if (placeholder) {
+				placeholder.innerHTML = html;
+			}
+		} catch (error) {
+			console.error("Failed to load blog:", error);
+		}
+	}
+
+	async loadHero() {
+		try {
+			const response = await fetch("./assets/templates/hero.html");
+			const html = await response.text();
+
+			const placeholder = document.getElementById("hero-placeholder");
+			if (placeholder) {
+				placeholder.innerHTML = html;
+			}
+		} catch (error) {
+			console.error("Failed to load hero:", error);
+		}
+	}
+
 	// Initialize contact form handling
 	initializeContactForm() {
 		const contactForm = document.getElementById("contact-form");
@@ -122,15 +140,26 @@ class TemplateLoader {
 			this.handleFormSubmission(contactForm, e);
 		});
 	}
-}
 
-// Initialize template loader
-const templateLoader = new TemplateLoader();
-templateLoader.loadTemplates();
+	// Update current date
+	async updateDate() {
+		const now = new Date();
+		const options = {
+			weekday: "long",
+			year: "numeric",
+			month: "long",
+			day: "numeric",
+		};
+
+		document.getElementById("current-date").textContent =
+			now.toLocaleDateString("en-US", options);
+	}
+}
 
 document.addEventListener("DOMContentLoaded", function () {
 	const hamburger = document.getElementById("hamburger");
 	const navLinks = document.querySelector(".nav-links");
+	const body = document.body;
 
 	hamburger.addEventListener("click", function () {
 		// Toggle active class on hamburger button
@@ -138,18 +167,22 @@ document.addEventListener("DOMContentLoaded", function () {
 
 		// Toggle active class on nav links
 		navLinks.classList.toggle("active");
+
+		// Toggle body scroll lock
+		body.classList.toggle("menu-open");
 	});
 
-	// Close menu when clicking on a link (optional)
+	// Close menu when clicking on a link
 	const navItems = document.querySelectorAll(".nav-links a");
 	navItems.forEach((item) => {
 		item.addEventListener("click", () => {
 			hamburger.classList.remove("active");
 			navLinks.classList.remove("active");
+			body.classList.remove("menu-open");
 		});
 	});
 
-	// Close menu when clicking outside (optional)
+	// Close menu when clicking outside
 	document.addEventListener("click", function (event) {
 		const isClickInside =
 			hamburger.contains(event.target) || navLinks.contains(event.target);
@@ -157,6 +190,11 @@ document.addEventListener("DOMContentLoaded", function () {
 		if (!isClickInside && navLinks.classList.contains("active")) {
 			hamburger.classList.remove("active");
 			navLinks.classList.remove("active");
+			body.classList.remove("menu-open");
 		}
 	});
 });
+
+// Initialize template loader
+const templateLoader = new TemplateLoader();
+templateLoader.initializeOnDOMContentLoaded();
